@@ -29,8 +29,8 @@ Use `/` to leave owner, group, or permissions unchanged.
 ## More Examples
 
 ```bash
-cogp user / / /some/path        # changes only owner
-cogp user / r--r----- /some/path # changes only owner and permissions
-cogp / / 700 /some/path          # changes only permissions
+cogp user / / /some/path          # changes only owner
+cogp user / r--r----- /some/path  # changes only owner and permissions
+cogp / / 700 /some/path           # changes only permissions
 ```
 
