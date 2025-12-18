@@ -17,8 +17,6 @@ cogp user group 744 /path1 /path2 /path3
 
 > At least one path is required.
 
-## Permissions
-
 Permissions can be expressed either as:
 
 - Symbolic string: `rwxrwxrwx`
