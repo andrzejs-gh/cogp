@@ -26,7 +26,7 @@ Permissions can be expressed either as:
 
 Use `/` to leave owner, group, or permissions unchanged.
 
-## More Examples
+Examples:
 
 ```bash
 cogp user / / /some/path          # changes only owner
