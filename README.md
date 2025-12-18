@@ -2,7 +2,7 @@
 
 A small UNIX utility for changing owner / group / permissions in a single command.
 
-## Usage:
+Usage:
 
 cogp <owner name> <group name> <permissions> <path1> <path2> ... 
 
