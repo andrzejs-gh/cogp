@@ -1,10 +1,13 @@
 #include <iostream>
+#include <string>
 #include <pwd.h>		
 #include <grp.h>        
-#include <sys/stat.h>  
+#include <sys/stat.h> 
+#include <dirent.h>
 #include <unistd.h>     
 #include <cstring>
 #include <cerrno>
+#include <vector>
 
 const uid_t invalid_owner_uid = (uid_t)-2;
 const gid_t invalid_group_gid = (gid_t)-2;
@@ -32,17 +35,18 @@ gid_t get_gid(const std::string& groupname)
 mode_t get_permission_mode(const std::string& permissions_arg)
 {
 	// validate the input:
-	int permissions_arg_size = permissions_arg.size();
+	int arg_length = permissions_arg.size();
 	if (permissions_arg == "/")
 		return dont_change_permissions;
-	else if (permissions_arg_size != 3 && permissions_arg_size != 9)
+	else if (arg_length != 3 && arg_length != 4 && arg_length != 9)
 		return invalid_permission_mode;
 	
 	int owner_bit = 0;
 	int group_bit = 0;
 	int others_bit = 0; 
+	int special_bit = 0;
 	
-	if (permissions_arg_size == 3)
+	if (arg_length == 3)
 	{
 		for (char c : permissions_arg) 
 		{
@@ -52,93 +56,254 @@ mode_t get_permission_mode(const std::string& permissions_arg)
 		owner_bit = permissions_arg[0] - '0';
 		group_bit = permissions_arg[1] - '0';
 		others_bit = permissions_arg[2] - '0';
+		
 	}
-	else // (permissions_arg_size == 9)
+	else if (arg_length == 4)
 	{
 		for (char c : permissions_arg) 
 		{
-			if (c != 'r' && c != 'w' && c != 'x' && c != '-')
+			if (c < '0' || c > '7')
 				return invalid_permission_mode;
 		}
-	
+		special_bit = permissions_arg[0] - '0';
+		owner_bit = permissions_arg[1] - '0';
+		group_bit = permissions_arg[2] - '0';
+		others_bit = permissions_arg[3] - '0';
+	}
+	else // (arg_length == 9)
+	{	
 		// owner bit
 		if (permissions_arg[0] == 'r')
 			owner_bit += 4;
+		else if (permissions_arg[0] != '-')
+			return invalid_permission_mode;
 		if (permissions_arg[1] == 'w')
 			owner_bit += 2;
+		else if (permissions_arg[1] != '-')
+			return invalid_permission_mode;
 		if (permissions_arg[2] == 'x')
 			owner_bit += 1;
+		else if (permissions_arg[2] == 's')
+		{
+			owner_bit += 1;
+			special_bit += 4;
+		}
+		else if (permissions_arg[2] == 'S')
+			special_bit += 4;
+		else if (permissions_arg[2] != '-')
+			return invalid_permission_mode;
 			
 		// group bit
 		if (permissions_arg[3] == 'r')
 			group_bit += 4;
+		else if (permissions_arg[3] != '-')
+			return invalid_permission_mode;
 		if (permissions_arg[4] == 'w')
 			group_bit += 2;
+		else if (permissions_arg[4] != '-')
+			return invalid_permission_mode;
 		if (permissions_arg[5] == 'x')
 			group_bit += 1;
+		else if (permissions_arg[5] == 's')
+		{
+			group_bit += 1;
+			special_bit += 2;
+		}
+		else if (permissions_arg[5] == 'S')
+			special_bit += 2;
+		else if (permissions_arg[5] != '-')
+			return invalid_permission_mode;
 			
 		// others bit
 		if (permissions_arg[6] == 'r')
 			others_bit += 4;
+		else if (permissions_arg[6] != '-')
+			return invalid_permission_mode;
 		if (permissions_arg[7] == 'w')
 			others_bit += 2;
+		else if (permissions_arg[7] != '-')
+			return invalid_permission_mode;
 		if (permissions_arg[8] == 'x')
 			others_bit += 1;
+		else if (permissions_arg[8] == 't')
+		{
+			others_bit += 1;
+		    special_bit += 1;
+		}
+		else if (permissions_arg[8] == 'T')
+			special_bit += 1;
+		else if (permissions_arg[8] != '-')
+			return invalid_permission_mode;
 	}
 	
-	mode_t mode = (owner_bit << 6) | (group_bit << 3) | others_bit;
+	mode_t mode = (special_bit << 9) | (owner_bit << 6) | (group_bit << 3) | others_bit;
 	return mode;
 }
 
-int main(int argc, char* argv[])
+void collect_paths_recursively(std::vector<std::string>& paths)
 {
-	if (argc == 2)
-	{
-		std::string arg = argv[1];
-		if (arg == "--help" || arg == "-h")
+	struct stat st;
+    std::vector<std::string> stack;
+    
+    for (const auto& path : paths) // filtering out file paths
+    {
+		if (stat(path.c_str(), &st) == 0)
 		{
-			std::cout << "Usage: cogp <owner name> <group name> <permissions> <path1> <path2> ... \n"
-						 "Example:\n"
-						 "	cogp user group rwxr--r-- /path1 /path2 /path3 \n"
-						 "	cogp user group 744 /path1 /path2 /path3 \n"
-						 "\n"
-						 "At least one path is required.\n"
-						 "\n"
-						 "Permissions can be expressed either as:\n"
-						 "	- Symbolic string: \"rwxrwxrwx\"\n"
-						 "	- Numeric (octal) mode: 000–777 \n"
-						 "\n"
-						 "Use \"/\" to leave owner, group, or permissions unchanged.\n"
-						 "\n"
-						 "Examples:\n"
-						 "	1: cogp user / / /some/path \n"
-						 "		(changes only owner) \n"
-						 "	2: cogp user / r--r----- /some/path \n"
-						 "		(changes only owner and permissions) \n"
-						 "	3: cogp / / 700 /some/path \n"
-						 "		(changes only permissions) \n"
-						 "\n"
-						 "Use -h or --help to display this message.\n"
-						 "Use -V or --version to display version.\n";
-			return 0;
-		}
-		else if (arg == "--version" || arg == "-V")
-		{
-			std::cout << "cogp: version 1.0\n";
-			return 0;
+			if (S_ISDIR(st.st_mode)) 
+				stack.emplace_back(path);
 		}
 	}
-	
-	if (argc < 5)
+    
+    std::string current_dir;
+    std::string item_name, path;
+    
+    while (!stack.empty())
+    {
+		current_dir = stack.back();
+		stack.pop_back();
+		
+		DIR* dir = opendir(current_dir.c_str());
+        if (!dir)
+        {
+            std::cerr << "Failed to open directory:\n"
+                      << current_dir << "\n"
+                      << strerror(errno) << "\n" << "\x1E";
+                      // "\x1E" functions here and below as a separator between errors 
+                      // for a GUI app reading the stream
+            continue;
+        }
+        
+        struct dirent* item;
+        while ((item = readdir(dir)) != nullptr)
+        {
+			item_name = item->d_name;
+
+            // skipping "." and ".."
+            if (item_name == "." || item_name == "..")
+                continue;
+            
+            path = current_dir + "/" + item_name;
+            
+            if (lstat(path.c_str(), &st) != 0)
+            {
+                std::cerr << "Failed to access:\n"
+                          << path << "\n"
+                          << strerror(errno) << "\n" << "\x1E";
+                continue;
+            }
+            
+            if (S_ISLNK(st.st_mode)) // if it's a symlink
+				continue; // ignore symlinks
+			else if (S_ISDIR(st.st_mode)) // if it's a directory
+			{
+				stack.emplace_back(path);
+                paths.emplace_back(path);
+			}
+			else if (S_ISREG(st.st_mode)) // if it's a file
+			{
+				paths.emplace_back(path);
+			}
+			else // if it's anything else
+			{
+				std::cerr << "Failed to access the path as a directory or a file:\n"
+                << path << "\n" << "\x1E";
+			}
+		}
+		closedir(dir);
+	}
+}
+
+int cerr_when_missing_args_if_(bool not_enough_args)
+{
+	if (not_enough_args)
 	{
 		std::cerr << "Missing arguments.\n" 
 					 "Use -h or --help to display help.\n";
 		return 1;
 	}
+	return 0;
+}
+
+int main(int argc, char* argv[])
+{
+	if (cerr_when_missing_args_if_(argc < 2))
+		return 1;
+	
+	std::string first_arg = argv[1];
+	if (argc == 2)
+	{
+		if (first_arg == "--help" || first_arg == "-h")
+		{
+			std::cout << "Usage:\n" 
+						 "cogp [-r | --recursive] <owner name> <group name> <permissions> <path1> [<path2> ... ]\n"
+						 "\n"
+						 "Examples:\n"
+						 "	cogp user group rwxr--r-- <path1> [<path2> ... ] \n"
+						 "	cogp user group 744 <path1> [<path2> ... ] \n"
+						 "	cogp -r user group 0600 <path1> [<path2> ... ] \n"
+						 "	cogp --recursive user group 644 <path1> [<path2> ... ] \n"
+						 "\n"
+						 "At least one path is required.\n"
+						 "\n"
+						 "Use \"-r\" or \"--recursive\" as the first argument to apply recursively.\n"
+						 "Symlinks below top-level paths are ignored.\n"
+						 "If none of the top-level paths is a directory, the flag has no effect.\n"
+						 "\n"
+						 "Permissions can be expressed either as:\n"
+						 "	- Symbolic string: \"rwxrwxrwx\", special bits \"s\" \"S\" \"t\" \"T\" are allowed\n"
+						 "	- Numeric (octal) mode: 000–777 \n"
+						 "	- Numeric (octal) mode: 0000–7777 \n"
+						 "\n"
+						 "Use \"/\" to leave owner, group, or permissions unchanged.\n"
+						 "\n"
+						 "Examples:\n"
+						 "	1: cogp user / / <path1> [<path2> ... ] \n"
+						 "		(changes only owner) \n"
+						 "	2: cogp user / r--r----- <path1> [<path2> ... ] \n"
+						 "		(changes only owner and permissions) \n"
+						 "	3: cogp / / 700 <path1> [<path2> ... ] \n"
+						 "		(changes only permissions) \n"
+						 "	4: cogp -r user / / <path1> [<path2> ... ] \n"
+						 "		(changes only owner and applies recursively to all subpaths) \n"
+						 "\n"
+						 "Use -h or --help to display this message.\n"
+						 "Use -V or --version to display version.\n";
+			return 0;
+		}
+		else if (first_arg == "--version" || first_arg == "-V")
+		{
+			std::cout << "cogp: version 1.1\n";
+			return 0;
+		}
+	}
+	
+	bool recursive = false;
+	std::string owner, group, permissions;
+	std::vector<std::string> paths;
+	
+	if (first_arg == "-r" || first_arg == "--recursive")
+	{
+		if (cerr_when_missing_args_if_(argc < 6))
+			return 1;
 		
-    std::string owner = argv[1];
-    std::string group = argv[2];
-    std::string permissions = argv[3];
+		recursive = true;
+		owner = argv[2];
+		group = argv[3];
+		permissions = argv[4];
+		paths.assign(argv + 5, argv + argc);
+		collect_paths_recursively(paths);
+	}
+	else
+	{
+		if (cerr_when_missing_args_if_(argc < 5))
+			return 1;
+		
+		owner = argv[1];
+		group = argv[2];
+		permissions = argv[3];
+		paths.assign(argv + 4, argv + argc);
+    }
+    
     uid_t owner_uid = dont_change_owner_uid;   // default values - don't change
 	gid_t group_gid = dont_change_group_gid;
     bool change_owner = false; 
@@ -149,8 +314,9 @@ int main(int argc, char* argv[])
     {
 		std::cerr << "Invalid permissions argument.\n"
 					 "Permissions can be expressed either as:\n"
-						 "	- Symbolic string: \"rwxrwxrwx\"\n"
-						 "	- Numeric (octal) mode: 000–777 \n";
+						 "	- Symbolic string: \"rwxrwxrwx\", special bits \"s\" \"S\" \"t\" \"T\" are allowed\n"
+						 "	- Numeric (octal) mode: 000–777 \n"
+						 "	- Numeric (octal) mode: 0000–7777 \n";
 		return 1;
 	}
     
@@ -179,14 +345,16 @@ int main(int argc, char* argv[])
 	{
 		if (change_owner || change_group)
 		{
-			for (int i = 4; i < argc; i++)
+			// Iterate in reverse to apply changes to children before parents.
+			// This prevents permission changes on a parent directory from 
+			// locking access to its contents when running the program without root.
+			for (int i = paths.size()-1; i >= 0; i--)
 			{
-				char* path = argv[i];
+				const char* path = paths[i].c_str();
 				if (chown(path, owner_uid, group_gid) != 0) // if chown failed
 				{
 					std::cerr << "Failed to change owner or group for:\n" 
 					          << path << "\n" << strerror(errno) << "\n" << "\x1E"; 
-					          // "\x1E" functions here as a separator between errors for a GUI app reading the stream
 				}
 				if (chmod(path, permission_mode) != 0) // if chmod failed
 				{
@@ -197,9 +365,9 @@ int main(int argc, char* argv[])
 		}
 		else // if only permissions are to be changed
 		{
-			for (int i = 4; i < argc; i++)
+			for (int i = paths.size()-1; i >= 0; i--)
 			{
-				char* path = argv[i];
+				const char* path = paths[i].c_str();
 				if (chmod(path, permission_mode) != 0)
 				{
 					std::cerr << "Failed to change permissions for:\n" 
@@ -212,9 +380,9 @@ int main(int argc, char* argv[])
 	{
 		if (change_owner || change_group)
 		{
-			for (int i = 4; i < argc; i++)
+			for (int i = paths.size()-1; i >= 0; i--)
 			{
-				char* path = argv[i];
+				const char* path = paths[i].c_str();
 				if (chown(path, owner_uid, group_gid) != 0)
 				{
 					std::cerr << "Failed to change owner or group for:\n" 
