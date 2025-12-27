@@ -144,6 +144,7 @@ void collect_paths_recursively(std::vector<std::string>& paths)
 {
 	struct stat st;
     std::vector<std::string> stack;
+    stack.reserve(128);
     
     for (const auto& path : paths) // filtering out file paths
     {
@@ -156,6 +157,9 @@ void collect_paths_recursively(std::vector<std::string>& paths)
     
     std::string current_dir;
     std::string item_name, path;
+    current_dir.reserve(4096); 
+    item_name.reserve(255); 
+    path.reserve(4096);
     
     while (!stack.empty())
     {
@@ -182,7 +186,9 @@ void collect_paths_recursively(std::vector<std::string>& paths)
             if (item_name == "." || item_name == "..")
                 continue;
             
-            path = current_dir + "/" + item_name;
+            path = current_dir;
+            path += "/"; 
+            path += item_name;
             
             if (lstat(path.c_str(), &st) != 0)
             {
@@ -280,6 +286,7 @@ int main(int argc, char* argv[])
 	bool recursive = false;
 	std::string owner, group, permissions;
 	std::vector<std::string> paths;
+	paths.reserve(1024);
 	
 	if (first_arg == "-r" || first_arg == "--recursive")
 	{
