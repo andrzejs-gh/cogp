@@ -6,6 +6,8 @@ A UNIX utility for changing owner, group, and permissions in a single command.
 
 ```bash
 cogp [-r | --recursive] <owner name> <group name> <permissions> <path1> [<path2> ... ]
+cogp [-r | --recursive] <owner name> <group name> <permissions> --list <path_to_list>
+cogp [-r | --recursive] <owner name> <group name> <permissions> # read paths from stdin
 ```
 
 ### Examples
@@ -13,11 +15,13 @@ cogp [-r | --recursive] <owner name> <group name> <permissions> <path1> [<path2>
 ```bash
 cogp user group rwxr--r-- <path1> [<path2> ... ] 
 cogp user group 744 <path1> [<path2> ... ] 
+cogp user group 700 --list <path_to_list> 
 cogp -r user group 0600 <path1> [<path2> ... ] 
 cogp --recursive user group 644 <path1> [<path2> ... ] 
+some_program | cogp user group 644 
 ```
 
-> At least one path is required.
+> Paths provided via a path list file or stdin must be null-terminated.
 
 Use "-r" or "--recursive" as the first argument to apply recursively.
 Symlinks below top-level paths are ignored.
@@ -34,19 +38,19 @@ Use `/` to leave owner, group, or permissions unchanged.
 ### More Examples
 
 ```bash
-cogp user / / <path1> [<path2> ... ]
+cogp user / / [...]
 ```
 > changes only owner
 ```bash
-cogp user / r--r----- <path1> [<path2> ... ] 
+cogp user / r--r----- [...]
 ```
 > changes only owner and permissions
 ```bash
-cogp / / 700 <path1> [<path2> ... ]
+cogp / / 700 [...]
 ```
 > changes only permissions
 ```bash
-cogp -r user / / <path1> [<path2> ... ] 
+cogp -r user / / [...] 
 ```
 > changes only owner and applies recursively to all subpaths 
 

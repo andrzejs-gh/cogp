@@ -4,7 +4,8 @@
 #include <grp.h>        
 #include <sys/stat.h> 
 #include <dirent.h>
-#include <unistd.h>     
+#include <unistd.h>
+#include <fcntl.h> 
 #include <cstring>
 #include <cerrno>
 #include <vector>
@@ -140,7 +141,62 @@ mode_t get_permission_mode(const std::string& permissions_arg)
 	return mode;
 }
 
-void collect_paths_recursively(std::vector<std::string>& paths)
+int load_paths_from_stdin_or_file(std::vector<std::string>& paths, 
+								  const char* path_list_file = nullptr)
+{
+	int file_descriptor;
+	if (path_list_file) // if path_list_file was provided
+	{
+		file_descriptor = open(path_list_file, O_RDONLY);
+		if (file_descriptor < 0)
+			return 1;
+	}
+	else // else read from stdin
+		file_descriptor = STDIN_FILENO;
+	
+	std::vector<char> buffer;
+	buffer.reserve(65536);
+	char chunk[65536]; // read in 64 KB chunks
+	ssize_t read_bytes;
+	while (true) 
+	{
+		read_bytes = read(file_descriptor, chunk, sizeof(chunk));
+		if (read_bytes <= 0)
+		{
+			if (read_bytes == 0) // EOF reached
+				break;
+			else // error
+			{
+				if (path_list_file)
+					close(file_descriptor);
+				return 1;
+			}
+		}
+		buffer.insert(buffer.end(), chunk, chunk + read_bytes);
+	}
+	if (path_list_file)
+		close(file_descriptor);
+	if (buffer.empty())
+		return 2;
+		
+	const char* path_beginning = buffer.data();
+	const char* beyond_buffer = path_beginning + buffer.size();
+	const char* path_null_term;
+	while (path_beginning < beyond_buffer)
+	{
+		path_null_term = static_cast<const char*>(memchr(
+												  path_beginning, 
+												  '\0', 
+												  beyond_buffer - path_beginning));
+		if (!path_null_term) // for the cases when the last path is not trailed with '\0' in the buffer
+			path_null_term = beyond_buffer;
+		paths.emplace_back(path_beginning, path_null_term - path_beginning);
+		path_beginning = path_null_term + 1;
+	}
+	return 0;
+}
+
+void collect_all_paths(std::vector<std::string>& paths)
 {
 	struct stat st;
     std::vector<std::string> stack;
@@ -230,26 +286,49 @@ int cerr_when_missing_args_if_(bool not_enough_args)
 	return 0;
 }
 
+int cerr_when_loading_paths_fails(int return_code)
+{
+	if (return_code == 1)
+	{
+		std::cerr << "An error occured when reading from stdin or list file.\n"
+				  << "\x1E";
+		return 1;
+	}
+	else if (return_code == 2)
+	{
+		std::cerr << "No paths in stdin or list file.\n"
+				  << "\x1E";
+		return 1;
+	}
+	return 0;
+}
+
 int main(int argc, char* argv[])
 {
 	if (cerr_when_missing_args_if_(argc < 2))
 		return 1;
 	
 	std::string first_arg = argv[1];
+	bool recursive = false;
+	
 	if (argc == 2)
 	{
 		if (first_arg == "--help" || first_arg == "-h")
 		{
 			std::cout << "Usage:\n" 
-						 "cogp [-r | --recursive] <owner name> <group name> <permissions> <path1> [<path2> ... ]\n"
+						 "	cogp [-r | --recursive] <owner name> <group name> <permissions> <path1> [<path2> ... ]\n"
+						 "	cogp [-r | --recursive] <owner name> <group name> <permissions> --list <path_to_list>\n"
+						 "	cogp [-r | --recursive] <owner name> <group name> <permissions> # read paths from stdin\n"
 						 "\n"
 						 "Examples:\n"
 						 "	cogp user group rwxr--r-- <path1> [<path2> ... ] \n"
 						 "	cogp user group 744 <path1> [<path2> ... ] \n"
+						 "	cogp user group 700 --list <path_to_list> \n"
 						 "	cogp -r user group 0600 <path1> [<path2> ... ] \n"
 						 "	cogp --recursive user group 644 <path1> [<path2> ... ] \n"
+						 "	some_program | cogp user group 644 \n"
 						 "\n"
-						 "At least one path is required.\n"
+						 "Paths provided via a path list file or stdin must be null-terminated.\n"
 						 "\n"
 						 "Use \"-r\" or \"--recursive\" as the first argument to apply recursively.\n"
 						 "Symlinks below top-level paths are ignored.\n"
@@ -263,13 +342,13 @@ int main(int argc, char* argv[])
 						 "Use \"/\" to leave owner, group, or permissions unchanged.\n"
 						 "\n"
 						 "Examples:\n"
-						 "	1: cogp user / / <path1> [<path2> ... ] \n"
+						 "	1: cogp user / / [...] \n"
 						 "		(changes only owner) \n"
-						 "	2: cogp user / r--r----- <path1> [<path2> ... ] \n"
+						 "	2: cogp user / r--r----- [...] \n"
 						 "		(changes only owner and permissions) \n"
-						 "	3: cogp / / 700 <path1> [<path2> ... ] \n"
+						 "	3: cogp / / 700 [...] \n"
 						 "		(changes only permissions) \n"
-						 "	4: cogp -r user / / <path1> [<path2> ... ] \n"
+						 "	4: cogp -r user / / [...] \n"
 						 "		(changes only owner and applies recursively to all subpaths) \n"
 						 "\n"
 						 "Use -h or --help to display this message.\n"
@@ -278,56 +357,68 @@ int main(int argc, char* argv[])
 		}
 		else if (first_arg == "--version" || first_arg == "-V")
 		{
-			std::cout << "cogp: version 1.1\n";
+			std::cout << "cogp: version 1.2\n";
 			return 0;
 		}
-	}
-	
-	bool recursive = false;
-	std::string owner, group, permissions;
-	std::vector<std::string> paths;
-	paths.reserve(1024);
-	
-	if (first_arg == "-r" || first_arg == "--recursive")
-	{
-		if (cerr_when_missing_args_if_(argc < 6))
+		else // if argc == 2 but its none of the allowed single args 
+		{
+			cerr_when_missing_args_if_(true);
 			return 1;
-		
-		recursive = true;
-		owner = argv[2];
-		group = argv[3];
-		permissions = argv[4];
-		paths.assign(argv + 5, argv + argc);
-		collect_paths_recursively(paths);
+		}
 	}
-	else
+	else if (cerr_when_missing_args_if_(argc < 4))
+		return 1;
+	else if (first_arg == "--recursive" || first_arg == "-r")
 	{
 		if (cerr_when_missing_args_if_(argc < 5))
 			return 1;
-		
+		recursive = true;
+	}
+	
+	std::string owner, group, permissions;
+	int list_flag_position, valid_argc_if_stdin, valid_argc_if_list_flag;
+	// check moved here::::::
+	if (recursive)
+	{
+		owner = argv[2];
+		group = argv[3];
+		permissions = argv[4];
+		valid_argc_if_stdin = 5;
+		list_flag_position = 5;
+		valid_argc_if_list_flag = 7;
+	}
+	else
+	{
 		owner = argv[1];
 		group = argv[2];
 		permissions = argv[3];
-		paths.assign(argv + 4, argv + argc);
-    }
-    
-    uid_t owner_uid = dont_change_owner_uid;   // default values - don't change
+		valid_argc_if_stdin = 4;
+		list_flag_position = 4;
+		valid_argc_if_list_flag = 6;
+	}
+	
+	const char* path_list_file = nullptr;
+	if (argc > valid_argc_if_stdin && std::string(argv[list_flag_position]) == "--list")
+	{
+		if (argc == valid_argc_if_list_flag)
+			path_list_file = argv[list_flag_position + 1];
+		else if (argc == valid_argc_if_list_flag - 1)
+		{
+			std::cerr << "Missing path after \"--list\"." << "\n";
+			return 1;
+		}
+		else if (argc > valid_argc_if_list_flag)
+		{
+			std::cerr << "\"--list\" can only be followed by a single argument (path)." << "\n";
+			return 1;
+		}
+	}
+	
+	uid_t owner_uid = dont_change_owner_uid;   // default values - don't change
 	gid_t group_gid = dont_change_group_gid;
     bool change_owner = false; 
     bool change_group = false;
-    mode_t permission_mode = get_permission_mode(permissions);
-    
-    if (permission_mode == invalid_permission_mode)
-    {
-		std::cerr << "Invalid permissions argument.\n"
-					 "Permissions can be expressed either as:\n"
-						 "	- Symbolic string: \"rwxrwxrwx\", special bits \"s\" \"S\" \"t\" \"T\" are allowed\n"
-						 "	- Numeric (octal) mode: 000–777 \n"
-						 "	- Numeric (octal) mode: 0000–7777 \n";
-		return 1;
-	}
-    
-    if (owner != "/") // if the owner is to be changed
+	if (owner != "/") // if the owner is to be changed
     {
 		change_owner = true;
 		owner_uid = get_uid(owner);
@@ -347,6 +438,31 @@ int main(int argc, char* argv[])
 			return 1;
 		}
 	} 
+	
+	mode_t permission_mode = get_permission_mode(permissions);
+	if (permission_mode == invalid_permission_mode)
+    {
+		std::cerr << "Invalid permissions argument.\n"
+					 "Permissions can be expressed either as:\n"
+						 "	- Symbolic string: \"rwxrwxrwx\", special bits \"s\" \"S\" \"t\" \"T\" are allowed\n"
+						 "	- Numeric (octal) mode: 000–777 \n"
+						 "	- Numeric (octal) mode: 0000–7777 \n";
+		return 1;
+	}
+	
+	std::vector<std::string> paths;
+	paths.reserve(1024);
+	
+	if (argc == valid_argc_if_stdin || path_list_file) // load paths from stdin or path list file
+	{
+		if (cerr_when_loading_paths_fails(load_paths_from_stdin_or_file(paths, path_list_file)))
+			return 1;
+	}
+	else // load paths from cmd line args
+		paths.assign(argv + valid_argc_if_stdin, argv + argc);
+		
+	if (recursive)
+		collect_all_paths(paths);
 	
 	if (permission_mode != dont_change_permissions)
 	{
