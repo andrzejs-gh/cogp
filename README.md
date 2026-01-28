@@ -54,4 +54,18 @@ cogp -r user / / [...]
 ```
 > changes only owner and applies recursively to all subpaths 
 
+## Installation and uninstallation
 
+Installation and uninstallation are handled by Python scripts in /scripts. 
+
+To install **cogp**, launch INSTALL.desktop.
+Installation will build and install `cogp` binary in `~/.local/bin`. 
+
+To uninstall, launch UNINSTALL.desktop which will remove `cogp` binary from `~/.local/bin` (if it exists).
+
+## Build requirements
+
+- **CMake ≥ 3.16**
+- **C++17-compatible compiler**
+
+If any dependencies are missing, the installation script notifies the user and provides instructions on how to install them.
