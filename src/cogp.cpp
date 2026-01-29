@@ -261,15 +261,8 @@ void collect_all_paths(std::vector<std::string>& paths)
 				stack.emplace_back(path);
                 paths.emplace_back(path);
 			}
-			else if (S_ISREG(st.st_mode)) // if it's a file
-			{
+			else // if it's a file or anything else
 				paths.emplace_back(path);
-			}
-			else // if it's anything else
-			{
-				std::cerr << "Failed to access the path as a directory or a file:\n"
-                << path << "\n" << "\x1E";
-			}
 		}
 		closedir(dir);
 	}
