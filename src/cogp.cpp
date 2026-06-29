@@ -10,25 +10,27 @@
 #include <cerrno>
 #include <vector>
 
-const uid_t invalid_owner_uid = (uid_t)-2;
-const gid_t invalid_group_gid = (gid_t)-2;
-const uid_t dont_change_owner_uid = (uid_t)-1;
-const gid_t dont_change_group_gid = (gid_t)-1;
-const mode_t invalid_permission_mode  = (mode_t)-2;
-const mode_t dont_change_permissions = (mode_t)-1;
+#define VERSION "1.3"
+
+constexpr uid_t invalid_owner_uid = static_cast<uid_t>(-2);
+constexpr gid_t invalid_group_gid = static_cast<gid_t>(-2);
+constexpr uid_t dont_change_owner_uid = static_cast<uid_t>(-1);
+constexpr gid_t dont_change_group_gid = static_cast<gid_t>(-1);
+constexpr mode_t invalid_permission_mode  = static_cast<mode_t>(-2);
+constexpr mode_t dont_change_permissions = static_cast<mode_t>(-1);
 
 uid_t get_uid(const std::string& username) 
 {
-    struct passwd* pw = getpwnam(username.c_str()); // look up user name
-    if (!pw) // if nullptr - not found
+    struct passwd* pw = getpwnam(username.c_str());
+    if (!pw) // username not found
 		return invalid_owner_uid;
     return pw->pw_uid; // return UID
 }
 
 gid_t get_gid(const std::string& groupname) 
 {
-    struct group* gr = getgrnam(groupname.c_str()); // look up group name
-    if (!gr) // if nullptr - not found
+    struct group* gr = getgrnam(groupname.c_str());
+    if (!gr) // groupname not found
 		return invalid_group_gid;
     return gr->gr_gid; // return GID
 }
@@ -350,7 +352,7 @@ int main(int argc, char* argv[])
 		}
 		else if (first_arg == "--version" || first_arg == "-V")
 		{
-			std::cout << "cogp: version 1.2\n";
+			std::cout << "cogp v" VERSION "\n";
 			return 0;
 		}
 		else // if argc == 2 but its none of the allowed single args 
